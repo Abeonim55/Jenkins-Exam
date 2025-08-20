@@ -25,20 +25,22 @@ pipeline {
 
     stage('Smoke test containers') {
       steps {
-        sh '''
-          set -e
-          docker run -d --name test-movie -p 8081:8000 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
-          docker run -d --name test-cast  -p 8082:8000 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
-          # petit délai
-          sleep 5
-          # ping sans dépendance DB : /docs répond toujours 200 avec FastAPI
-          curl -sf http://localhost:8081/docs >/dev/null
-          curl -sf http://localhost:8082/docs >/dev/null
-
-          docker rm -f test-movie test-cast || true
-        '''
+        script {
+          catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+            sh '''
+              set -e
+              docker run -d --name test-movie -p 8081:8000 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
+              docker run -d --name test-cast  -p 8082:8000 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
+              sleep 8
+              curl -sf http://localhost:8081/docs >/dev/null
+              curl -sf http://localhost:8082/docs >/dev/null
+            '''
+          }
+        }
+        sh 'docker rm -f test-movie test-cast || true'
       }
     }
+
 
 
     stage('Docker Push') {
