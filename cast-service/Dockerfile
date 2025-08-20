@@ -1,14 +1,17 @@
-FROM python:3.8-slim
+FROM python:3.9-slim
 
-WORKDIR /app
+WORKDIR /code
 
-COPY ./requirements.txt /app/requirements.txt
-
+# Dépendances de build pour psycopg2/asyncpg
 RUN apt-get update \
-    && apt-get install gcc -y \
-    && apt-get clean
+  && apt-get install -y --no-install-recommends gcc libpq-dev python3-dev \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install -r /app/requirements.txt \
-    && rm -rf /root/.cache/pip
+COPY requirements.txt /code/requirements.txt
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
-COPY . /app/
+COPY ./app /code/app
+
+# Uvicorn/Gunicorn exposent 80 dans les exemples du cours
+EXPOSE 80
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]

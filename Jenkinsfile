@@ -1,0 +1,139 @@
+pipeline {
+  agent any
+  environment {
+    DOCKER_ID    = "abeonim"            // Docker Hub user
+    MOVIE_IMAGE  = "movies-api"
+    CAST_IMAGE   = "casts-api"
+    BUILD_TAG    = "v${BUILD_NUMBER}.0" // tag unique à chaque build
+  }
+
+  stages {
+    stage('Checkout info') {
+      steps { sh 'git log -1 --oneline || true' }
+    }
+
+    stage('Docker Build') {
+      steps {
+        sh '''
+          set -e
+          docker rm -f test-movie test-cast || true
+          docker build -t $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG ./movie-service
+          docker build -t $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG  ./cast-service
+        '''
+      }
+    }
+
+    stage('Smoke test containers') {
+      steps {
+        sh '''
+          set -e
+          docker run -d --name test-movie -p 8081:80 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
+          docker run -d --name test-cast  -p 8082:80 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
+          sleep 3
+          curl -sf http://localhost:8081/ >/dev/null
+          curl -sf http://localhost:8082/ >/dev/null
+          docker rm -f test-movie test-cast || true
+        '''
+      }
+    }
+
+    stage('Docker Push') {
+      environment { DOCKER_PASS = credentials('DOCKER_HUB_PASS') } // Secret text
+      steps {
+        sh '''
+          set -e
+          docker login -u $DOCKER_ID -p $DOCKER_PASS
+          docker push $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
+          docker push $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
+        '''
+      }
+    }
+
+    stage('Deploy dev') {
+      environment { KUBECONFIG = credentials('config') } // Secret file
+      steps {
+        sh '''
+          set -e
+          mkdir -p .kube && cat $KUBECONFIG > .kube/config
+          helm upgrade --install movie-api charts \
+            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE \
+            --set image.tag=$BUILD_TAG \
+            --set service.port=80 \
+            --namespace dev --create-namespace --wait --atomic
+
+          helm upgrade --install cast-api charts \
+            --set image.repository=$DOCKER_ID/$CAST_IMAGE \
+            --set image.tag=$BUILD_TAG \
+            --set service.port=80 \
+            --namespace dev --create-namespace --wait --atomic
+
+          echo -n "movie image (dev): ";  kubectl -n dev get deploy movie-api-fastapi -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "cast  image (dev): ";  kubectl -n dev get deploy cast-api-fastapi  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+        '''
+      }
+    }
+
+    stage('Deploy qa') {
+      environment { KUBECONFIG = credentials('config') }
+      steps {
+        sh '''
+          set -e
+          mkdir -p .kube && cat $KUBECONFIG > .kube/config
+          helm upgrade --install movie-api charts \
+            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace qa --create-namespace --wait --atomic
+
+          helm upgrade --install cast-api charts \
+            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace qa --create-namespace --wait --atomic
+        '''
+      }
+    }
+
+    stage('Deploy staging') {
+      environment { KUBECONFIG = credentials('config') }
+      steps {
+        sh '''
+          set -e
+          mkdir -p .kube && cat $KUBECONFIG > .kube/config
+          helm upgrade --install movie-api charts \
+            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace staging --create-namespace --wait --atomic
+
+          helm upgrade --install cast-api charts \
+            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace staging --create-namespace --wait --atomic
+        '''
+      }
+    }
+
+    stage('Approval & Deploy prod') {
+      when { branch 'main' }
+      environment { KUBECONFIG = credentials('config') }
+      steps {
+        timeout(time: 15, unit: 'MINUTES') {
+          input message: 'Déployer en production ?', ok: 'Oui'
+        }
+        sh '''
+          set -e
+          mkdir -p .kube && cat $KUBECONFIG > .kube/config
+          helm upgrade --install movie-api charts \
+            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace prod --create-namespace --wait --atomic
+
+          helm upgrade --install cast-api charts \
+            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
+            --namespace prod --create-namespace --wait --atomic
+
+          echo -n "movie image (prod): "; kubectl -n prod get deploy movie-api-fastapi -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "cast  image (prod): "; kubectl -n prod get deploy cast-api-fastapi  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+        '''
+      }
+    }
+  }
+
+  post {
+    success { echo "OK: $BUILD_TAG déployé" }
+    failure { echo "FAILED build $BUILD_NUMBER" }
+  }
+}
