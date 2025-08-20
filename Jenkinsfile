@@ -1,39 +1,40 @@
 pipeline {
   agent any
   environment {
-    DOCKER_ID    = "abeonim"            // Docker Hub user
-    MOVIE_IMAGE  = "movies-api"
-    CAST_IMAGE   = "casts-api"
-    BUILD_TAG    = "v${BUILD_NUMBER}.0" // tag unique à chaque build
+    DOCKER_ID   = "abeonim"
+    MOVIE_IMAGE = "movies-api"
+    CAST_IMAGE  = "casts-api"
+    BUILD_TAG   = "v${BUILD_NUMBER}.0"
   }
 
   stages {
-    stage('Checkout info') {
-      steps { sh 'git log -1 --oneline || true' }
+    stage('Checkout') {
+      steps { checkout scm }
     }
 
     stage('Docker Build') {
       steps {
         sh '''
           set -e
-          docker rm -f test-movie test-cast || true
           docker build -t $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG ./movie-service
           docker build -t $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG  ./cast-service
         '''
       }
     }
 
-    stage('Smoke test containers') {
+    stage('Smoke test (containers)') {
       steps {
         script {
           catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
             sh '''
               set -e
+              docker rm -f test-movie test-cast || true
               docker run -d --name test-movie -p 8081:8000 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
               docker run -d --name test-cast  -p 8082:8000 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
-              sleep 8
-              curl -sf http://localhost:8081/docs >/dev/null
-              curl -sf http://localhost:8082/docs >/dev/null
+              sleep 6
+              # FastAPI expose TOUJOURS /openapi.json -> 200
+              curl -sf http://localhost:8081/openapi.json >/dev/null
+              curl -sf http://localhost:8082/openapi.json >/dev/null
             '''
           }
         }
@@ -41,10 +42,8 @@ pipeline {
       }
     }
 
-
-
     stage('Docker Push') {
-      environment { DOCKER_PASS = credentials('DOCKER_HUB_PASS') } // Secret text
+      environment { DOCKER_PASS = credentials('DOCKER_HUB_PASS') }
       steps {
         sh '''
           set -e
@@ -62,62 +61,18 @@ pipeline {
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
 
-          # 1) DBs d'abord (namespace dev)
+          # DBs (tes manifests existants)
           kubectl -n dev apply -f k8s/postgres-movie.yaml
           kubectl -n dev apply -f k8s/postgres-cast.yaml
           kubectl -n dev rollout status deploy/movie-db -n dev --timeout=180s
           kubectl -n dev rollout status deploy/cast-db  -n dev --timeout=180s
 
-          # 2) Apps (Helm) - SANS --wait/--atomic à cette étape
-          #    movie-api garde 30007 ; cast-api prend 30008 pour éviter le conflit
-          helm upgrade --install movie-api charts \
-            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE \
-            --set image.tag=$BUILD_TAG \
-            --set service.port=80 \
-            --set service.nodePort=30007 \
-            --namespace dev --create-namespace
+          # Apps (on fixe le tag du build du jour via --set)
+          helm upgrade --install movie-api charts -n dev -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n dev -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
 
-          helm upgrade --install cast-api charts \
-            --set image.repository=$DOCKER_ID/$CAST_IMAGE \
-            --set image.tag=$BUILD_TAG \
-            --set service.port=80 \
-            --set service.nodePort=30008 \
-            --namespace dev --create-namespace
-
-          # 3) Injecter l'ENV (les deux noms pour être sûr) puis redémarrer
-          kubectl -n dev set env deploy/movie-api-fastapiapp \
-            DATABASE_URI=postgresql://movie:moviepass@movie-db:5432/moviedb \
-            DATABASE_URL=postgresql://movie:moviepass@movie-db:5432/moviedb
-          kubectl -n dev set env deploy/cast-api-fastapiapp \
-            DATABASE_URI=postgresql://cast:castpass@cast-db:5432/castdb \
-            DATABASE_URL=postgresql://cast:castpass@cast-db:5432/castdb
-
-          kubectl -n dev rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
-
-          # 4) Attendre que ça devienne Ready
-          kubectl -n dev rollout status deploy/movie-api-fastapiapp --timeout=300s
-          kubectl -n dev rollout status deploy/cast-api-fastapiapp  --timeout=300s
-
-          # 5) Afficher l'image effective
-          echo -n "movie image (dev): ";  kubectl -n dev get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-          echo -n "cast  image (dev): ";  kubectl -n dev get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-        '''
-      }
-    }
-
-    stage('Deploy qa') {
-      environment { KUBECONFIG = credentials('config') }
-      steps {
-        sh '''
-          set -e
-          mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          helm upgrade --install movie-api charts \
-            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace qa --create-namespace --wait --atomic
-
-          helm upgrade --install cast-api charts \
-            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace qa --create-namespace --wait --atomic
+          echo -n "movie image (dev): "; kubectl -n dev get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "cast  image (dev): "; kubectl -n dev get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
         '''
       }
     }
@@ -128,13 +83,8 @@ pipeline {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          helm upgrade --install movie-api charts \
-            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace staging --create-namespace --wait --atomic
-
-          helm upgrade --install cast-api charts \
-            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace staging --create-namespace --wait --atomic
+          helm upgrade --install movie-api charts -n staging -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n staging -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
         '''
       }
     }
@@ -149,23 +99,18 @@ pipeline {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          helm upgrade --install movie-api charts \
-            --set image.repository=$DOCKER_ID/$MOVIE_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace prod --create-namespace --wait --atomic
+          helm upgrade --install movie-api charts -n prod -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n prod -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
 
-          helm upgrade --install cast-api charts \
-            --set image.repository=$DOCKER_ID/$CAST_IMAGE --set image.tag=$BUILD_TAG --set service.port=80 \
-            --namespace prod --create-namespace --wait --atomic
-
-          echo -n "movie image (prod): "; kubectl -n prod get deploy movie-api-fastapi -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-          echo -n "cast  image (prod): "; kubectl -n prod get deploy cast-api-fastapi  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "movie image (prod): "; kubectl -n prod get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "cast  image (prod): "; kubectl -n prod get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
         '''
       }
     }
   }
 
   post {
-    success { echo "OK: $BUILD_TAG déployé" }
-    failure { echo "FAILED build $BUILD_NUMBER" }
+    success { echo "OK: ${BUILD_TAG} déployé" }
+    failure { echo "FAILED build ${BUILD_NUMBER}" }
   }
 }

@@ -3,14 +3,17 @@ kind: Service
 metadata:
   name: {{ include "fastapiapp.fullname" . }}
   labels:
-    {{- include "fastapiapp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: fastapiapp
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   type: {{ .Values.service.type }}
-  ports:
-    - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.service.targetPort }}
-      nodePort: {{ .Values.service.nodePort }}
-      protocol: TCP
-      name: http
   selector:
-    {{- include "fastapiapp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/name: fastapiapp
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      {{- if .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}

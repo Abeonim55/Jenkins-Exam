@@ -1,0 +1,15 @@
+image:
+  repository: abeonim/casts-api
+  tag: v8.0
+
+service:
+  port: 80
+  targetPort: 8000
+  nodePort: 30008
+
+env:
+  DATABASE_URI: "postgresql://cast:castpass@cast-db:5432/castdb"
+  DATABASE_URL: "postgresql://cast:castpass@cast-db:5432/castdb"
+
+probes:
+  enabled: false

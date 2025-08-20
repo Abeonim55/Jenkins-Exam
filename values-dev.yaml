@@ -1,0 +1,21 @@
+image:
+  repository: abeonim/movies-api   # ou casts-api selon le release
+  tag: v8.0
+
+service:
+  port: 80
+  nodePort: 30007                  # 30008 pour cast
+
+readinessProbe:
+  tcpSocket: { port: 8000 }
+  initialDelaySeconds: 5
+  timeoutSeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
+
+livenessProbe:
+  tcpSocket: { port: 8000 }
+  initialDelaySeconds: 5
+  timeoutSeconds: 2
+  periodSeconds: 10
+  failureThreshold: 3
