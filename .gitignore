@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+privkey.pem
+fullchain.pem
+ssl-dhparams.pem
+*.log
+*.sql
+*.tar
+*.gz
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.etcd
+*.db
+**/snaphot-on-demand

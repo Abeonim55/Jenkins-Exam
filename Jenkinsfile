@@ -27,15 +27,18 @@ pipeline {
       steps {
         sh '''
           set -e
-          docker run -d --name test-movie -p 8081:80 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
-          docker run -d --name test-cast  -p 8082:80 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
-          sleep 3
-          curl -sf http://localhost:8081/ >/dev/null
-          curl -sf http://localhost:8082/ >/dev/null
+          docker run -d --name test-movie -p 8081:8000 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
+          docker run -d --name test-cast  -p 8082:8000 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
+
+          # attendre que ça écoute (jusqu’à 10s)
+          for i in $(seq 1 10); do curl -sf http://localhost:8081/ && break || sleep 1; done
+          for i in $(seq 1 10); do curl -sf http://localhost:8082/ && break || sleep 1; done
+
           docker rm -f test-movie test-cast || true
         '''
       }
     }
+
 
     stage('Docker Push') {
       environment { DOCKER_PASS = credentials('DOCKER_HUB_PASS') } // Secret text

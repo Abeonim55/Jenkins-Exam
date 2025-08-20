@@ -1,0 +1,37 @@
+# Archives et fichiers lourds
+*.tar
+*.tar.*
+*.log
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.cache/
+pytest_cache/
+
+# Environnements virtuels
+.env
+.env/
+venv/
+
+# IDE et OS
+.idea/
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.dockerignore
+.gitlab-ci.yml
+
+# Documentation
+*.md
+
+# Tests (optionnel)
+tests/
