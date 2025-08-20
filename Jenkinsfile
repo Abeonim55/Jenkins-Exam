@@ -68,8 +68,8 @@ pipeline {
           kubectl -n dev rollout status deploy/cast-db  -n dev --timeout=180s
 
           # Apps (on fixe le tag du build du jour via --set)
-          helm upgrade --install movie-api charts -n dev -f charts/movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
-          helm upgrade --install cast-api  charts -n dev -f charts/cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install movie-api charts -n dev -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n dev -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
 
           echo -n "movie image (dev): "; kubectl -n dev get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
           echo -n "cast  image (dev): "; kubectl -n dev get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
@@ -83,8 +83,8 @@ pipeline {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          helm upgrade --install movie-api charts -n staging -f charts/movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
-          helm upgrade --install cast-api  charts -n staging -f charts/cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install movie-api charts -n staging -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n staging -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
         '''
       }
     }
@@ -99,8 +99,8 @@ pipeline {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          helm upgrade --install movie-api charts -n prod -f charts/movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
-          helm upgrade --install cast-api  charts -n prod -f charts/cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install movie-api charts -n prod -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
+          helm upgrade --install cast-api  charts -n prod -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
 
           echo -n "movie image (prod): "; kubectl -n prod get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
           echo -n "cast  image (prod): "; kubectl -n prod get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo

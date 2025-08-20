@@ -1,0 +1,36 @@
+# === requis par le chart ===
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+autoscaling:
+  enabled: false
+
+# === ton app movie ===
+image:
+  repository: abeonim/movies-api
+  tag: v8.0
+
+containerPort: 8000
+
+service:
+  type: NodePort
+  port: 80
+  targetPort: 8000
+  nodePort: 30007
+
+env:
+  DATABASE_URI: "postgresql://movie:moviepass@movie-db:5432/moviedb"
+  DATABASE_URL: "postgresql://movie:moviepass@movie-db:5432/moviedb"
+
+probes:
+  enabled: false
