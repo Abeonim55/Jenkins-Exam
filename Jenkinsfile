@@ -62,40 +62,43 @@ pipeline {
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
 
-          # 1) DBs d'abord
+          # 1) DBs d'abord (dans le namespace dev)
           kubectl -n dev apply -f k8s/postgres-movie.yaml
           kubectl -n dev apply -f k8s/postgres-cast.yaml
-          kubectl -n dev rollout status deploy/movie-db -n dev --timeout=120s
-          kubectl -n dev rollout status deploy/cast-db  -n dev --timeout=120s
+          kubectl -n dev rollout status deploy/movie-db -n dev --timeout=180s
+          kubectl -n dev rollout status deploy/cast-db  -n dev --timeout=180s
 
-          # 2) Apps (Helm) — conteneurs écoutent 8000, service 80 -> 8000
+          # 2) Apps (Helm) - SANS wait/atomic à cette étape
           helm upgrade --install movie-api charts \
             --set image.repository=$DOCKER_ID/$MOVIE_IMAGE \
             --set image.tag=$BUILD_TAG \
             --set service.port=80 \
-            --namespace dev --create-namespace --wait --atomic
+            --namespace dev --create-namespace
 
           helm upgrade --install cast-api charts \
             --set image.repository=$DOCKER_ID/$CAST_IMAGE \
             --set image.tag=$BUILD_TAG \
             --set service.port=80 \
-            --namespace dev --create-namespace --wait --atomic
+            --namespace dev --create-namespace
 
-          # 3) Injecter l'ENV (si le chart ne le supporte pas nativement) + restart
+          # 3) Injecter l'ENV puis redémarrer proprement
           kubectl -n dev set env deploy/movie-api-fastapiapp \
             DATABASE_URI=postgresql://movie:moviepass@movie-db:5432/moviedb
           kubectl -n dev set env deploy/cast-api-fastapiapp \
             DATABASE_URI=postgresql://cast:castpass@cast-db:5432/castdb
 
           kubectl -n dev rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
-          kubectl -n dev rollout status deploy/movie-api-fastapiapp --timeout=180s
-          kubectl -n dev rollout status deploy/cast-api-fastapiapp  --timeout=180s
+
+          # 4) Attendre que ça devienne Ready (et échouer ici si problème)
+          kubectl -n dev rollout status deploy/movie-api-fastapiapp --timeout=300s
+          kubectl -n dev rollout status deploy/cast-api-fastapiapp  --timeout=300s
 
           echo -n "movie image (dev): ";  kubectl -n dev get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
           echo -n "cast  image (dev): ";  kubectl -n dev get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
         '''
       }
     }
+
 
     stage('Deploy qa') {
       environment { KUBECONFIG = credentials('config') }
