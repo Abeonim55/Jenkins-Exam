@@ -14,4 +14,4 @@ COPY ./app /code/app
 
 # Uvicorn/Gunicorn exposent 80 dans les exemples du cours
 EXPOSE 80
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

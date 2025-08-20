@@ -29,10 +29,11 @@ pipeline {
           set -e
           docker run -d --name test-movie -p 8081:8000 $DOCKER_ID/$MOVIE_IMAGE:$BUILD_TAG
           docker run -d --name test-cast  -p 8082:8000 $DOCKER_ID/$CAST_IMAGE:$BUILD_TAG
-
-          # attendre que ça écoute (jusqu’à 10s)
-          for i in $(seq 1 10); do curl -sf http://localhost:8081/ && break || sleep 1; done
-          for i in $(seq 1 10); do curl -sf http://localhost:8082/ && break || sleep 1; done
+          # petit délai
+          sleep 5
+          # ping sans dépendance DB : /docs répond toujours 200 avec FastAPI
+          curl -sf http://localhost:8081/docs >/dev/null
+          curl -sf http://localhost:8082/docs >/dev/null
 
           docker rm -f test-movie test-cast || true
         '''
