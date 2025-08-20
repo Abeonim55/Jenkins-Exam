@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cast-db-secret
+type: Opaque
+stringData:
+  POSTGRES_DB: castdb
+  POSTGRES_USER: cast
+  POSTGRES_PASSWORD: castpass
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cast-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cast-db }
+  template:
+    metadata:
+      labels: { app: cast-db }
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:12.1-alpine
+        ports:
+        - containerPort: 5432
+        envFrom:
+        - secretRef:
+            name: cast-db-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cast-db
+spec:
+  selector: { app: cast-db }
+  ports:
+  - name: pg
+    port: 5432
+    targetPort: 5432

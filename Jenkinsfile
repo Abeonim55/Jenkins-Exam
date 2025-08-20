@@ -56,11 +56,19 @@ pipeline {
     }
 
     stage('Deploy dev') {
-      environment { KUBECONFIG = credentials('config') } // Secret file
+      environment { KUBECONFIG = credentials('config') }
       steps {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
+
+          # 1) DBs d'abord
+          kubectl -n dev apply -f k8s/postgres-movie.yaml
+          kubectl -n dev apply -f k8s/postgres-cast.yaml
+          kubectl -n dev rollout status deploy/movie-db -n dev --timeout=120s
+          kubectl -n dev rollout status deploy/cast-db  -n dev --timeout=120s
+
+          # 2) Apps (Helm) — conteneurs écoutent 8000, service 80 -> 8000
           helm upgrade --install movie-api charts \
             --set image.repository=$DOCKER_ID/$MOVIE_IMAGE \
             --set image.tag=$BUILD_TAG \
@@ -73,8 +81,18 @@ pipeline {
             --set service.port=80 \
             --namespace dev --create-namespace --wait --atomic
 
-          echo -n "movie image (dev): ";  kubectl -n dev get deploy movie-api-fastapi -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
-          echo -n "cast  image (dev): ";  kubectl -n dev get deploy cast-api-fastapi  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          # 3) Injecter l'ENV (si le chart ne le supporte pas nativement) + restart
+          kubectl -n dev set env deploy/movie-api-fastapiapp \
+            DATABASE_URI=postgresql://movie:moviepass@movie-db:5432/moviedb
+          kubectl -n dev set env deploy/cast-api-fastapiapp \
+            DATABASE_URI=postgresql://cast:castpass@cast-db:5432/castdb
+
+          kubectl -n dev rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
+          kubectl -n dev rollout status deploy/movie-api-fastapiapp --timeout=180s
+          kubectl -n dev rollout status deploy/cast-api-fastapiapp  --timeout=180s
+
+          echo -n "movie image (dev): ";  kubectl -n dev get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo -n "cast  image (dev): ";  kubectl -n dev get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
         '''
       }
     }
