@@ -61,7 +61,7 @@ pipeline {
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
 
-          # DBs (tes manifests existants)
+          # DBs (tes manifests existants) 
           kubectl -n dev apply -f k8s/postgres-movie.yaml
           kubectl -n dev apply -f k8s/postgres-cast.yaml
           kubectl -n dev rollout status deploy/movie-db -n dev --timeout=180s
