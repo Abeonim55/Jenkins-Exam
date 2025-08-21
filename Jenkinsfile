@@ -74,37 +74,58 @@ pipeline {
         sh '''
           set -e
           mkdir -p .kube && cat $KUBECONFIG > .kube/config
-          for i in $(seq 1 30); do
-            if kubectl get --raw='/readyz' >/dev/null 2>&1; then break; fi
-            echo "K8s API not ready yet..."; sleep 3
-          done
 
-          kubectl -n staging apply -f k8s/postgres-movie.yaml
-          kubectl -n staging apply -f k8s/postgres-cast.yaml
-          kubectl -n staging rollout status deploy/movie-db --timeout=180s
-          kubectl -n staging rollout status deploy/cast-db  --timeout=180s
+          # helper retry kubectl (tolère les "Timeout" / lenteurs API)
+          retry_k() {
+            n=0
+            until [ $n -ge 5 ]; do
+              kubectl --request-timeout=60s "$@" && return 0
+              n=$((n+1))
+              echo "kubectl retry $n/5: $*"
+              sleep $((n*5))
+            done
+            return 1
+          }
 
-          # Helm cleanup (in case of previous failed deploys)
-          helm -n staging uninstall movie-api || true
-          helm -n staging uninstall cast-api  || true
+          # 1) DBs d'abord
+          retry_k -n staging apply -f k8s/postgres-movie.yaml
+          retry_k -n staging apply -f k8s/postgres-cast.yaml
+          retry_k -n staging rollout status deploy/movie-db --timeout=180s
+          retry_k -n staging rollout status deploy/cast-db  --timeout=180s
 
-          helm upgrade --install movie-api charts -n staging -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
-          helm upgrade --install cast-api  charts -n staging -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
+          # 2) Apps (Helm) — timeout helm augmenté, atomic
+          helm upgrade --install movie-api charts \
+            -n staging --create-namespace \
+            -f movie-values.yaml \
+            --set image.tag=$BUILD_TAG \
+            --wait --atomic --timeout 10m0s
 
-          # inject DB env (chart-agnostic)
-          kubectl -n staging set env deploy/movie-api-fastapiapp \
+          helm upgrade --install cast-api charts \
+            -n staging --create-namespace \
+            -f cast-values.yaml  \
+            --set image.tag=$BUILD_TAG \
+            --wait --atomic --timeout 10m0s
+
+          # 3) Env vars DB
+          retry_k -n staging set env deploy/movie-api-fastapiapp \
             DATABASE_URI=postgresql://movie:moviepass@movie-db:5432/moviedb \
             DATABASE_URL=postgresql://movie:moviepass@movie-db:5432/moviedb
-          kubectl -n staging set env deploy/cast-api-fastapiapp \
+
+          retry_k -n staging set env deploy/cast-api-fastapiapp \
             DATABASE_URI=postgresql://cast:castpass@cast-db:5432/castdb \
             DATABASE_URL=postgresql://cast:castpass@cast-db:5432/castdb
 
-          kubectl -n staging rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
-          kubectl -n staging rollout status  deploy/movie-api-fastapiapp --timeout=180s
-          kubectl -n staging rollout status  deploy/cast-api-fastapiapp  --timeout=180s
+          # 4) Restart + attente (avec retry)
+          retry_k -n staging rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
+          retry_k -n staging rollout status  deploy/movie-api-fastapiapp --timeout=600s
+          retry_k -n staging rollout status  deploy/cast-api-fastapiapp  --timeout=600s
+
+          # 5) (facultatif) petit récap pour debug rapide
+          retry_k -n staging get deploy,svc -o wide
         '''
       }
     }
+
 
     stage('Approval & Deploy prod') {
       when {
