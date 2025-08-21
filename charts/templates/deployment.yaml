@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/name: fastapiapp
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 3
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: fastapiapp
