@@ -23,3 +23,37 @@ probes:
     path: /
   liveness:
     path: /
+
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+
+podAnnotations: {}
+podLabels: {}
+
+
+resources: {}  
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+# (optionnel) pour éviter d'autres nil-pointer si le chart les lit :
+nameOverride: ""
+fullnameOverride: ""
