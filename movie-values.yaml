@@ -1,3 +1,5 @@
+replicaCount: 1
+
 serviceAccount:
   create: true
   automount: true

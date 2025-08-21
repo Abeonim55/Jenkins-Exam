@@ -53,6 +53,10 @@ pipeline {
           kubectl -n dev rollout status deploy/movie-db --timeout=180s
           kubectl -n dev rollout status deploy/cast-db  --timeout=180s
 
+          # Helm cleanup (in case of previous failed deploys)
+          helm -n dev uninstall movie-api  || true
+          helm -n dev uninstall cast-api   || true
+
           # Apps (values files already set; only tag varies)
           helm upgrade --install movie-api charts -n dev -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
           helm upgrade --install cast-api  charts -n dev -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
@@ -79,6 +83,10 @@ pipeline {
           kubectl -n staging apply -f k8s/postgres-cast.yaml
           kubectl -n staging rollout status deploy/movie-db --timeout=180s
           kubectl -n staging rollout status deploy/cast-db  --timeout=180s
+
+          # Helm cleanup (in case of previous failed deploys)
+          helm -n staging uninstall movie-api || true
+          helm -n staging uninstall cast-api  || true
 
           helm upgrade --install movie-api charts -n staging -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
           helm upgrade --install cast-api  charts -n staging -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
@@ -122,6 +130,10 @@ pipeline {
           kubectl -n prod rollout status deploy/movie-db --timeout=180s
           kubectl -n prod rollout status deploy/cast-db  --timeout=180s
 
+          # Helm cleanup (in case of previous failed deploys)
+          helm -n prod uninstall movie-api || true
+          helm -n prod uninstall cast-api  || true
+
           helm upgrade --install movie-api charts -n prod -f movie-values.yaml --set image.tag=$BUILD_TAG --wait --atomic
           helm upgrade --install cast-api  charts -n prod -f cast-values.yaml  --set image.tag=$BUILD_TAG --wait --atomic
 
@@ -132,12 +144,35 @@ pipeline {
             DATABASE_URI=postgresql://cast:castpass@cast-db:5432/castdb \
             DATABASE_URL=postgresql://cast:castpass@cast-db:5432/castdb
 
-          kubectl -n prod rollout restart deploy movie-api-fastapiapp cast-api-fastapiapp
-          kubectl -n prod rollout status  deploy/movie-api-fastapiapp --timeout=180s
-          kubectl -n prod rollout status  deploy/cast-api-fastapiapp  --timeout=180s
+
+          # 4) Rollout avec délai + tolérance puis health-check HTTP
+          set +e
+          kubectl -n prod rollout status deploy/movie-api-fastapiapp  --timeout=600s
+          RM=$?
+          kubectl -n prod rollout status deploy/cast-api-fastapiapp   --timeout=600s
+          RC=$?
+          set -e
+
+          # 5) Health checks "réels" (sur les NodePorts)
+          NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
+          MOVIE_PORT=$(kubectl -n prod get svc movie-api-fastapiapp -o jsonpath='{.spec.ports[0].nodePort}')
+          CAST_PORT=$(kubectl  -n prod get svc cast-api-fastapiapp  -o jsonpath='{.spec.ports[0].nodePort}')
+
+          # movie: redoc OK ?  cast: docs OK ?
+          if curl -sf "http://$NODE_IP:$MOVIE_PORT/redoc" >/dev/null && \
+            curl -sf "http://$NODE_IP:$CAST_PORT/api/v1/casts/docs" >/dev/null ; then
+            echo "Health checks OK (movie=$MOVIE_PORT, cast=$CAST_PORT) ; rollout exitcodes: movie=$RM cast=$RC"
+          else
+            echo "Health checks FAILED (movie=$MOVIE_PORT, cast=$CAST_PORT)"
+            kubectl -n prod get deploy,rs,pods -o wide
+            exit 1
+          fi
 
           echo -n "movie image (prod): "; kubectl -n prod get deploy movie-api-fastapiapp -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
           echo -n "cast  image (prod): "; kubectl -n prod get deploy cast-api-fastapiapp  -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+          echo "PROD movie redoc: http://$NODE_IP:$MOVIE_PORT/redoc"
+          echo "PROD cast  docs: http://$NODE_IP:$CAST_PORT/api/v1/casts/docs"
+
         '''
       }
     }
