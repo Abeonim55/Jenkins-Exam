@@ -124,6 +124,7 @@ pipeline {
           // vrai si BRANCH_NAME vaut 'main' (multibranch) OU si on build la branche par défaut
           return (env.BRANCH_NAME == 'main') || (env.GIT_BRANCH?.endsWith('/main')) || (env.CHANGE_TARGET == 'main')
         }
+      }
       environment { KUBECONFIG = credentials('config') }
       steps {
         timeout(time: 15, unit: 'MINUTES') {
